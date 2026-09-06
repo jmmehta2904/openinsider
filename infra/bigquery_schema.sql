@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS `sec_insider.insider_alerts` (
   ingestion_run_id STRING OPTIONS(description = "Pipeline run id that generated this alert")
 )
 PARTITION BY transaction_date
-CLUSTER BY ticker, suspicion_score, transaction_code
+CLUSTER BY ticker, transaction_code, insider_role
 OPTIONS (
   description = "Scored insider-trading alerts generated from enriched filings",
   require_partition_filter = false
