@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS `sec_insider.company_dim` (
   is_active BOOL NOT NULL OPTIONS(description = "Whether the company is currently included in the watchlist"),
   valid_from DATE NOT NULL OPTIONS(description = "Date this dimension record became valid"),
   valid_to DATE OPTIONS(description = "Date this dimension record stopped being valid; NULL means current"),
-  loaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP()
+  loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP() NOT NULL
 )
 CLUSTER BY ticker, cik
 OPTIONS (
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS `sec_insider.filing_documents_raw` (
   metadata_gcs_path STRING OPTIONS(description = "GCS URI for the metadata sidecar JSON"),
   content_sha256 STRING OPTIONS(description = "Hash of raw XML content for change detection"),
   ingestion_run_id STRING OPTIONS(description = "Pipeline run id that fetched this document"),
-  fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP()
+  fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP() NOT NULL
 )
 PARTITION BY filing_date
 CLUSTER BY ticker, cik, accession_number
@@ -79,8 +79,8 @@ CREATE TABLE IF NOT EXISTS `sec_insider.filings_raw` (
   ownership_nature STRING OPTIONS(description = "Direct or indirect ownership description"),
   is_derivative BOOL NOT NULL OPTIONS(description = "Whether the row came from derivativeTransaction"),
   raw_gcs_path STRING NOT NULL OPTIONS(description = "GCS URI for the source XML document"),
-  source_system STRING NOT NULL DEFAULT "sec_edgar",
-  parsed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  source_system STRING DEFAULT "sec_edgar" NOT NULL,
+  parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP() NOT NULL,
   ingestion_run_id STRING OPTIONS(description = "Pipeline run id that parsed this row")
 )
 PARTITION BY filing_date
@@ -101,8 +101,8 @@ CREATE TABLE IF NOT EXISTS `sec_insider.prices_enriched` (
   volume INT64 OPTIONS(description = "Trading volume when available"),
   pct_change FLOAT64 OPTIONS(description = "Percent change versus previous close"),
   news_count_7d INT64 OPTIONS(description = "Count of vendor news articles found for the ticker in the trailing seven days"),
-  data_vendor STRING NOT NULL DEFAULT "finnhub",
-  fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  data_vendor STRING DEFAULT "finnhub" NOT NULL,
+  fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP() NOT NULL,
   ingestion_run_id STRING OPTIONS(description = "Pipeline run id that loaded this row")
 )
 PARTITION BY price_date
@@ -124,8 +124,8 @@ CREATE TABLE IF NOT EXISTS `sec_insider.company_news_raw` (
   url STRING OPTIONS(description = "Canonical article URL"),
   image_url STRING OPTIONS(description = "Article image URL when returned by the vendor"),
   related STRING OPTIONS(description = "Vendor-provided related tickers or symbols"),
-  data_vendor STRING NOT NULL DEFAULT "finnhub",
-  fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  data_vendor STRING DEFAULT "finnhub" NOT NULL,
+  fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP() NOT NULL,
   ingestion_run_id STRING OPTIONS(description = "Pipeline run id that loaded this row")
 )
 PARTITION BY news_date
@@ -141,8 +141,8 @@ CREATE TABLE IF NOT EXISTS `sec_insider.macro_context` (
   vix NUMERIC OPTIONS(description = "CBOE volatility index level"),
   fed_funds_rate NUMERIC OPTIONS(description = "Federal funds rate"),
   treasury_10y NUMERIC OPTIONS(description = "10-year Treasury yield"),
-  data_vendor STRING NOT NULL DEFAULT "fred",
-  fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  data_vendor STRING DEFAULT "fred" NOT NULL,
+  fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP() NOT NULL,
   ingestion_run_id STRING OPTIONS(description = "Pipeline run id that loaded this row")
 )
 PARTITION BY macro_date
@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS `sec_insider.insider_alerts` (
   suspicion_score FLOAT64 NOT NULL OPTIONS(description = "Suspicion score from 0.0 to 1.0"),
   scoring_version STRING NOT NULL OPTIONS(description = "Version label for the scoring logic"),
   flag_reason STRING OPTIONS(description = "Human-readable explanation of the score"),
-  alerted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  alerted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP() NOT NULL,
   ingestion_run_id STRING OPTIONS(description = "Pipeline run id that generated this alert")
 )
 PARTITION BY transaction_date
@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS `sec_insider.weekly_summary` (
   total_sell_value_usd NUMERIC OPTIONS(description = "Total reported sale value"),
   alert_count INT64 NOT NULL OPTIONS(description = "Number of alerts generated for the week"),
   max_suspicion_score FLOAT64 OPTIONS(description = "Highest alert score in the week"),
-  generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP()
+  generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP() NOT NULL
 )
 PARTITION BY week_start_date
 CLUSTER BY ticker
