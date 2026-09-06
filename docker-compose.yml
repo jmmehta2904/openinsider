@@ -1,0 +1,63 @@
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.0
+  env_file:
+    - .env
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/project/dags
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    PYTHONPATH: /opt/airflow/project
+    _PIP_ADDITIONAL_REQUIREMENTS: google-cloud-bigquery==3.25.0 google-cloud-storage==2.18.2 requests==2.32.3 python-dotenv==1.0.1
+  volumes:
+    - ./:/opt/airflow/project
+    - airflow_logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -c "airflow db migrate &&
+      airflow users create
+      --username airflow
+      --firstname Airflow
+      --lastname Admin
+      --role Admin
+      --email airflow@example.com
+      --password airflow"
+
+  airflow-webserver:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    command: webserver
+
+  airflow-scheduler:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: scheduler
+
+volumes:
+  postgres_data:
+  airflow_logs:
