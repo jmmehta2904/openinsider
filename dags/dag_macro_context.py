@@ -52,7 +52,7 @@ def macro_context():
     def load_macro_context(fetch_result: dict) -> int:
         from google.cloud import bigquery, storage
 
-        from dags.bigquery_utils import replace_partition_rows
+        from dags.bigquery_utils import insert_new_rows_by_key
 
         gcs_path = fetch_result.get("gcs_path")
         if not gcs_path:
@@ -80,15 +80,14 @@ def macro_context():
                 by_date[macro_date][field_name] = observation["value"]
 
         client = bigquery.Client(project=_setting("GCP_PROJECT_ID"))
-        inserted = 0
-        for macro_date, row in sorted(by_date.items()):
-            inserted += replace_partition_rows(
-                client=client,
-                table_id=_table("macro_context"),
-                rows=[row],
-                partition_column="macro_date",
-                partition_value=macro_date,
-            )
+        rows = [row for _, row in sorted(by_date.items())]
+        inserted = insert_new_rows_by_key(
+            client=client,
+            table_id=_table("macro_context"),
+            rows=rows,
+            key_column="macro_date",
+            key_type="DATE",
+        )
         print(f"Loaded {inserted} macro context rows")
         return inserted
 

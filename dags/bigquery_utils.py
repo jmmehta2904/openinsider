@@ -31,16 +31,17 @@ def insert_new_rows_by_key(
     table_id: str,
     rows: Sequence[dict[str, Any]],
     key_column: str,
+    key_type: str = "STRING",
 ) -> int:
     """Insert rows whose key does not already exist in the target table."""
     if not rows:
         return 0
 
-    keys = [row[key_column] for row in rows if row.get(key_column)]
+    keys = [str(row[key_column]) for row in rows if row.get(key_column)]
     if not keys:
         return 0
 
-    existing = set(_existing_keys(client, table_id, key_column, keys))
+    existing = set(_existing_keys(client, table_id, key_column, keys, key_type))
     rows_to_insert = [row for row in rows if row.get(key_column) not in existing]
     if not rows_to_insert:
         return 0
@@ -125,13 +126,14 @@ def _existing_keys(
     table_id: str,
     key_column: str,
     keys: Sequence[str],
+    key_type: str = "STRING",
 ) -> list[str]:
     from google.cloud import bigquery
 
     query = f"""
-        SELECT {key_column}
+        SELECT CAST({key_column} AS STRING) AS existing_key
         FROM `{table_id}`
-        WHERE {key_column} IN UNNEST(@keys)
+        WHERE CAST({key_column} AS STRING) IN UNNEST(@keys)
     """
     job = client.query(
         query,
@@ -141,7 +143,7 @@ def _existing_keys(
             ]
         ),
     )
-    return [row[key_column] for row in job.result()]
+    return [row["existing_key"] for row in job.result()]
 
 
 def _normalize_rows_for_bigquery(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
