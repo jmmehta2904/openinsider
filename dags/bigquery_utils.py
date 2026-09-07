@@ -4,7 +4,26 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
+
+NUMERIC_COLUMNS = {
+    "price_per_share",
+    "total_value_usd",
+    "open",
+    "high",
+    "low",
+    "close",
+    "prev_close",
+    "sp500",
+    "vix",
+    "fed_funds_rate",
+    "treasury_10y",
+    "trade_close",
+    "price_7d_after",
+}
+
+NUMERIC_SCALE = Decimal("0.000000001")
 
 
 def insert_new_rows_by_key(
@@ -26,7 +45,7 @@ def insert_new_rows_by_key(
     if not rows_to_insert:
         return 0
 
-    errors = client.insert_rows_json(table_id, rows_to_insert)
+    errors = client.insert_rows_json(table_id, _normalize_rows_for_bigquery(rows_to_insert))
     if errors:
         raise RuntimeError(f"BigQuery insert failed for {table_id}: {errors}")
     return len(rows_to_insert)
@@ -64,7 +83,7 @@ def replace_partition_rows(
     if not rows:
         return 0
 
-    errors = client.insert_rows_json(table_id, list(rows))
+    errors = client.insert_rows_json(table_id, _normalize_rows_for_bigquery(rows))
     if errors:
         raise RuntimeError(f"BigQuery insert failed for {table_id}: {errors}")
     return len(rows)
@@ -96,7 +115,7 @@ def run_pipeline_audit(
         "error_message": error_message,
         "metadata": json.dumps(metadata or {}),
     }
-    errors = client.insert_rows_json(table_id, [row])
+    errors = client.insert_rows_json(table_id, _normalize_rows_for_bigquery([row]))
     if errors:
         raise RuntimeError(f"Pipeline audit insert failed: {errors}")
 
@@ -123,3 +142,25 @@ def _existing_keys(
         ),
     )
     return [row[key_column] for row in job.result()]
+
+
+def _normalize_rows_for_bigquery(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_normalize_row_for_bigquery(row) for row in rows]
+
+
+def _normalize_row_for_bigquery(row: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(row)
+    for column in NUMERIC_COLUMNS:
+        if column in normalized:
+            normalized[column] = _normalize_numeric_value(normalized[column])
+    return normalized
+
+
+def _normalize_numeric_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        numeric = Decimal(str(value)).quantize(NUMERIC_SCALE, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"Invalid NUMERIC value for BigQuery: {value!r}") from exc
+    return format(numeric.normalize(), "f")
