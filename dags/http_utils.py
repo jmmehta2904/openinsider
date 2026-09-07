@@ -27,5 +27,9 @@ def post_cloud_function_json(url: str, payload: dict[str, Any], timeout: int) ->
             ) from exc
 
     response = requests.post(url, json=payload, headers=headers, timeout=timeout)
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(
+            "Cloud Function call failed: "
+            f"status={response.status_code}, url={url}, body={response.text[:1000]}"
+        )
     return response.json()

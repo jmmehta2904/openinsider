@@ -12,8 +12,8 @@ from airflow.decorators import dag, task
 DEFAULT_ARGS = {
     "owner": "openinsider",
     "depends_on_past": False,
-    "retries": 2,
-    "retry_delay": timedelta(minutes=3),
+    "retries": int(os.getenv("AIRFLOW_TASK_RETRIES", "0")),
+    "retry_delay": timedelta(minutes=int(os.getenv("AIRFLOW_TASK_RETRY_DELAY_MINUTES", "1"))),
     "email_on_failure": False,
 }
 
