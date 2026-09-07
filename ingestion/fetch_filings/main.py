@@ -89,6 +89,13 @@ def _upload_text_if_absent(
     return True
 
 
+def _load_metadata_if_exists(bucket: storage.Bucket, path: str) -> dict[str, Any] | None:
+    blob = bucket.blob(path)
+    if not blob.exists():
+        return None
+    return json.loads(blob.download_as_text())
+
+
 @functions_framework.http
 def fetch_filings(request):
     """Fetch recent watchlist Form 4 filings from SEC EDGAR and land raw XML in GCS."""
@@ -152,6 +159,9 @@ def fetch_filings(request):
                     )
                     if not uploaded:
                         skipped_existing += 1
+                        existing_metadata = _load_metadata_if_exists(bucket, metadata_object_path)
+                        if existing_metadata:
+                            fetched_documents.append(existing_metadata)
                         continue
 
                     metadata = {

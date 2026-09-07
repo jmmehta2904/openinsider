@@ -26,6 +26,13 @@ def _table(table_name: str) -> str:
     return f"{_setting('GCP_PROJECT_ID')}.{_setting('BQ_DATASET', 'sec_insider')}.{table_name}"
 
 
+def _csv_setting(name: str) -> list[str] | None:
+    value = _setting(name).strip()
+    if not value:
+        return None
+    return [item.strip().upper() for item in value.split(",") if item.strip()]
+
+
 @dag(
     dag_id="price_enrichment",
     default_args=DEFAULT_ARGS,
@@ -41,11 +48,17 @@ def price_enrichment():
     def get_recent_filing_tickers() -> list[str]:
         from google.cloud import bigquery
 
+        configured_tickers = _csv_setting("PRICE_ENRICHMENT_TICKERS")
+        if configured_tickers:
+            print(f"Using configured tickers: {configured_tickers}")
+            return configured_tickers
+
         client = bigquery.Client(project=_setting("GCP_PROJECT_ID"))
+        lookback_days = int(_setting("PRICE_ENRICHMENT_LOOKBACK_DAYS", "7"))
         query = f"""
             SELECT DISTINCT ticker
             FROM `{_table("filings_raw")}`
-            WHERE filing_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY)
+            WHERE filing_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
               AND ticker IS NOT NULL
             ORDER BY ticker
         """
@@ -66,7 +79,7 @@ def price_enrichment():
 
         return post_cloud_function_json(
             url,
-            {"tickers": tickers, "news_days_back": 7},
+            {"tickers": tickers, "news_days_back": int(_setting("FINNHUB_NEWS_DAYS_BACK", "7"))},
             timeout=180,
         )
 

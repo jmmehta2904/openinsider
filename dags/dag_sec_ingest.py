@@ -28,6 +28,18 @@ def _table(table_name: str) -> str:
     return f"{project_id}.{dataset}.{table_name}"
 
 
+def _optional_int_setting(name: str) -> int | None:
+    value = _setting(name).strip()
+    return int(value) if value else None
+
+
+def _csv_setting(name: str) -> list[str] | None:
+    value = _setting(name).strip()
+    if not value:
+        return None
+    return [item.strip().upper() for item in value.split(",") if item.strip()]
+
+
 @dag(
     dag_id="sec_ingest",
     default_args=DEFAULT_ARGS,
@@ -47,7 +59,15 @@ def sec_ingest():
         if not url:
             raise RuntimeError("FETCH_FILINGS_URL is required")
 
-        return post_cloud_function_json(url, {"days_back": 2}, timeout=620)
+        payload = {"days_back": int(_setting("SEC_INGEST_DAYS_BACK", "2"))}
+        tickers = _csv_setting("SEC_INGEST_TICKERS")
+        max_filings_per_ticker = _optional_int_setting("SEC_MAX_FILINGS_PER_TICKER")
+        if tickers:
+            payload["tickers"] = tickers
+        if max_filings_per_ticker:
+            payload["max_filings_per_ticker"] = max_filings_per_ticker
+
+        return post_cloud_function_json(url, payload, timeout=620)
 
     @task
     def load_filing_document_metadata(fetch_result: dict) -> list[str]:
