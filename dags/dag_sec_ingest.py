@@ -6,13 +6,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 
-import requests
 from airflow.decorators import dag, task
-from google.cloud import bigquery, storage
-
-from config.settings import BQ_DATASET, GCP_PROJECT_ID, GCS_BUCKET
-from dags.bigquery_utils import insert_new_rows_by_key
-from transforms.parse_form4 import parse_form4_xml
 
 
 DEFAULT_ARGS = {
@@ -29,8 +23,8 @@ def _setting(name: str, default: str = "") -> str:
 
 
 def _table(table_name: str) -> str:
-    project_id = _setting("GCP_PROJECT_ID", GCP_PROJECT_ID)
-    dataset = _setting("BQ_DATASET", BQ_DATASET)
+    project_id = _setting("GCP_PROJECT_ID")
+    dataset = _setting("BQ_DATASET", "sec_insider")
     return f"{project_id}.{dataset}.{table_name}"
 
 
@@ -47,22 +41,22 @@ def _table(table_name: str) -> str:
 def sec_ingest():
     @task
     def trigger_fetch_filings() -> dict:
+        from dags.http_utils import post_cloud_function_json
+
         url = _setting("FETCH_FILINGS_URL")
         if not url:
             raise RuntimeError("FETCH_FILINGS_URL is required")
 
-        response = requests.post(
-            url,
-            json={"days_back": 2},
-            timeout=620,
-        )
-        response.raise_for_status()
-        return response.json()
+        return post_cloud_function_json(url, {"days_back": 2}, timeout=620)
 
     @task
     def load_filing_document_metadata(fetch_result: dict) -> list[str]:
-        bucket_name = _setting("GCS_BUCKET", GCS_BUCKET)
-        client = bigquery.Client(project=_setting("GCP_PROJECT_ID", GCP_PROJECT_ID))
+        from google.cloud import bigquery, storage
+
+        from dags.bigquery_utils import insert_new_rows_by_key
+
+        bucket_name = _setting("GCS_BUCKET")
+        client = bigquery.Client(project=_setting("GCP_PROJECT_ID"))
 
         documents = fetch_result.get("documents", [])
         rows = [
@@ -112,11 +106,16 @@ def sec_ingest():
 
     @task
     def parse_and_load_transactions(metadata_paths: list[str]) -> list[str]:
+        from google.cloud import bigquery, storage
+
+        from dags.bigquery_utils import insert_new_rows_by_key
+        from transforms.parse_form4 import parse_form4_xml
+
         if not metadata_paths:
             print("No metadata files available to parse")
             return []
 
-        bucket_name = _setting("GCS_BUCKET", GCS_BUCKET)
+        bucket_name = _setting("GCS_BUCKET")
         storage_client = storage.Client()
         bucket = storage_client.bucket(bucket_name)
         rows = []
@@ -139,7 +138,7 @@ def sec_ingest():
             if parsed_rows:
                 tickers.add(metadata["ticker"])
 
-        client = bigquery.Client(project=_setting("GCP_PROJECT_ID", GCP_PROJECT_ID))
+        client = bigquery.Client(project=_setting("GCP_PROJECT_ID"))
         inserted = insert_new_rows_by_key(
             client=client,
             table_id=_table("filings_raw"),

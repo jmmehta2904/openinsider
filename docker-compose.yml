@@ -1,14 +1,23 @@
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.9.0
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: openinsider-airflow:2.9.0
   env_file:
     - .env
   environment: &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/project/dags
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "120"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__WEBSERVER__WORKERS: "1"
+    AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: "300"
+    AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
+    AIRFLOW__WEBSERVER__WORKER_REFRESH_BATCH_SIZE: "0"
+    AIRFLOW__SCHEDULER__PARSING_PROCESSES: "1"
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "120"
     PYTHONPATH: /opt/airflow/project
-    _PIP_ADDITIONAL_REQUIREMENTS: google-cloud-bigquery==3.25.0 google-cloud-storage==2.18.2 requests==2.32.3 python-dotenv==1.0.1
   volumes:
     - ./:/opt/airflow/project
     - airflow_logs:/opt/airflow/logs
@@ -29,6 +38,7 @@ services:
       retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
 
   airflow-init:
     <<: *airflow-common
@@ -40,7 +50,7 @@ services:
       --lastname Admin
       --role Admin
       --email airflow@example.com
-      --password airflow"
+      --password airflow || true"
 
   airflow-webserver:
     <<: *airflow-common
@@ -50,6 +60,7 @@ services:
     ports:
       - "8080:8080"
     command: webserver
+    restart: unless-stopped
 
   airflow-scheduler:
     <<: *airflow-common
@@ -57,6 +68,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
     command: scheduler
+    restart: unless-stopped
 
 volumes:
   postgres_data:

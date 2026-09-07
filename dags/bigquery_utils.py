@@ -6,11 +6,9 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from google.cloud import bigquery
-
 
 def insert_new_rows_by_key(
-    client: bigquery.Client,
+    client: Any,
     table_id: str,
     rows: Sequence[dict[str, Any]],
     key_column: str,
@@ -35,7 +33,7 @@ def insert_new_rows_by_key(
 
 
 def replace_partition_rows(
-    client: bigquery.Client,
+    client: Any,
     table_id: str,
     rows: Sequence[dict[str, Any]],
     partition_column: str,
@@ -47,6 +45,8 @@ def replace_partition_rows(
     This pattern is intentionally simple for the small free-tier workload. It
     makes repeated Airflow task retries idempotent for daily snapshot tables.
     """
+    from google.cloud import bigquery
+
     predicate = f"{partition_column} = @partition_value"
     if extra_delete_predicate:
         predicate = f"{predicate} AND ({extra_delete_predicate})"
@@ -71,7 +71,7 @@ def replace_partition_rows(
 
 
 def run_pipeline_audit(
-    client: bigquery.Client,
+    client: Any,
     table_id: str,
     run_id: str,
     pipeline_name: str,
@@ -102,11 +102,13 @@ def run_pipeline_audit(
 
 
 def _existing_keys(
-    client: bigquery.Client,
+    client: Any,
     table_id: str,
     key_column: str,
     keys: Sequence[str],
 ) -> list[str]:
+    from google.cloud import bigquery
+
     query = f"""
         SELECT {key_column}
         FROM `{table_id}`

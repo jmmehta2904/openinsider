@@ -6,9 +6,6 @@ import os
 from datetime import datetime, timedelta
 
 from airflow.decorators import dag, task
-from google.cloud import bigquery
-
-from config.settings import BQ_DATASET, GCP_PROJECT_ID, GCS_BUCKET
 
 
 DEFAULT_ARGS = {
@@ -25,7 +22,7 @@ def _setting(name: str, default: str = "") -> str:
 
 
 def _table(table_name: str) -> str:
-    return f"{_setting('GCP_PROJECT_ID', GCP_PROJECT_ID)}.{_setting('BQ_DATASET', BQ_DATASET)}.{table_name}"
+    return f"{_setting('GCP_PROJECT_ID')}.{_setting('BQ_DATASET', 'sec_insider')}.{table_name}"
 
 
 @dag(
@@ -41,7 +38,9 @@ def _table(table_name: str) -> str:
 def weekly_report():
     @task
     def build_weekly_summary() -> str:
-        client = bigquery.Client(project=_setting("GCP_PROJECT_ID", GCP_PROJECT_ID))
+        from google.cloud import bigquery
+
+        client = bigquery.Client(project=_setting("GCP_PROJECT_ID"))
         query = f"""
         MERGE `{_table("weekly_summary")}` target
         USING (
@@ -93,11 +92,13 @@ def weekly_report():
 
     @task
     def export_weekly_report(_: str) -> None:
-        bucket = _setting("GCS_BUCKET", GCS_BUCKET)
+        from google.cloud import bigquery
+
+        bucket = _setting("GCS_BUCKET")
         if not bucket:
             raise RuntimeError("GCS_BUCKET is required")
 
-        client = bigquery.Client(project=_setting("GCP_PROJECT_ID", GCP_PROJECT_ID))
+        client = bigquery.Client(project=_setting("GCP_PROJECT_ID"))
         export_prefix = datetime.utcnow().date().isoformat()
         query = f"""
         EXPORT DATA OPTIONS (

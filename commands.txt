@@ -1,0 +1,426 @@
+OpenInsider Important Commands
+==============================
+
+This file is a working command reference for local development, GCP setup,
+Cloud Functions, Airflow, and cost control. Do not paste real secrets into this
+file.
+
+
+Local Git
+---------
+
+cd "C:\My Projects\Data_eng\Insider_trade_pipeline"
+
+git status
+git add .
+git commit -m "Your commit message"
+git push
+
+git pull
+
+
+Local Secrets Safety
+--------------------
+
+# Confirm .env is ignored and not staged.
+git status --short
+git check-ignore -v .env
+
+# Remove a file from Git tracking but keep it locally.
+git rm --cached .env.example
+
+
+Local Python Checks
+-------------------
+
+python --version
+
+python -m py_compile config/settings.py config/watchlist.py
+python -m py_compile ingestion/fetch_filings/main.py ingestion/fetch_prices/main.py ingestion/fetch_macro/main.py
+python -m py_compile transforms/parse_form4.py
+python -m py_compile dags/*.py
+
+pip install -r requirements-dev.txt
+python -m pytest tests -q
+
+
+GCP Project Selection
+---------------------
+
+gcloud projects list
+gcloud config set project YOUR_PROJECT_ID
+gcloud config get-value project
+
+export PROJECT_ID="$(gcloud config get-value project)"
+export REGION="us-central1"
+export ZONE="us-central1-a"
+export BQ_DATASET="sec_insider"
+export BQ_LOCATION="us-central1"
+export GCS_BUCKET="${PROJECT_ID}-sec-raw"
+
+echo $PROJECT_ID
+echo $REGION
+echo $ZONE
+echo $GCS_BUCKET
+
+
+GCP Local ADC Auth
+------------------
+
+gcloud auth login
+gcloud auth application-default login
+gcloud auth application-default set-quota-project YOUR_PROJECT_ID
+gcloud auth application-default print-access-token
+
+
+Enable GCP APIs
+---------------
+
+gcloud services enable \
+  cloudfunctions.googleapis.com \
+  run.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
+  storage.googleapis.com \
+  bigquery.googleapis.com \
+  cloudscheduler.googleapis.com \
+  compute.googleapis.com \
+  logging.googleapis.com \
+  secretmanager.googleapis.com \
+  iam.googleapis.com
+
+gcloud services list --enabled
+
+
+GCS Bucket
+----------
+
+gcloud storage buckets create "gs://$GCS_BUCKET" \
+  --project="$PROJECT_ID" \
+  --location="$REGION" \
+  --uniform-bucket-level-access \
+  --public-access-prevention
+
+gcloud storage buckets list --project="$PROJECT_ID"
+gcloud storage buckets describe "gs://$GCS_BUCKET"
+
+gcloud storage ls "gs://$GCS_BUCKET/"
+gcloud storage ls "gs://$GCS_BUCKET/macro/"
+gcloud storage ls "gs://$GCS_BUCKET/prices/"
+gcloud storage ls "gs://$GCS_BUCKET/news/"
+gcloud storage ls "gs://$GCS_BUCKET/filings/"
+
+
+BigQuery
+--------
+
+bq --location="$BQ_LOCATION" mk \
+  --dataset \
+  --description "SEC EDGAR insider trading warehouse" \
+  "$PROJECT_ID:$BQ_DATASET"
+
+bq query --use_legacy_sql=false --location="$BQ_LOCATION" < infra/bigquery_schema.sql
+
+bq ls "$PROJECT_ID:$BQ_DATASET"
+bq show --schema --format=prettyjson "$PROJECT_ID:$BQ_DATASET.filings_raw"
+
+bq query --use_legacy_sql=false --location="$BQ_LOCATION" \
+  "SELECT COUNT(*) AS rows FROM \`$PROJECT_ID.$BQ_DATASET.filings_raw\`"
+
+
+Service Accounts
+----------------
+
+gcloud iam service-accounts create openinsider-ingestion-sa \
+  --display-name="OpenInsider ingestion service account"
+
+gcloud iam service-accounts create openinsider-airflow-sa \
+  --display-name="OpenInsider Airflow service account"
+
+gcloud iam service-accounts create openinsider-serving-sa \
+  --display-name="OpenInsider serving service account"
+
+gcloud iam service-accounts list
+
+
+IAM Permissions
+---------------
+
+gcloud storage buckets add-iam-policy-binding "gs://$GCS_BUCKET" \
+  --member="serviceAccount:openinsider-ingestion-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/storage.objectAdmin"
+
+gcloud storage buckets add-iam-policy-binding "gs://$GCS_BUCKET" \
+  --member="serviceAccount:openinsider-airflow-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/storage.objectAdmin"
+
+bq query --use_legacy_sql=false --location="$BQ_LOCATION" "
+GRANT \`roles/bigquery.dataEditor\`
+ON SCHEMA \`$PROJECT_ID\`.$BQ_DATASET
+TO 'serviceAccount:openinsider-airflow-sa@$PROJECT_ID.iam.gserviceaccount.com';
+"
+
+bq query --use_legacy_sql=false --location="$BQ_LOCATION" "
+GRANT \`roles/bigquery.dataViewer\`
+ON SCHEMA \`$PROJECT_ID\`.$BQ_DATASET
+TO 'serviceAccount:openinsider-serving-sa@$PROJECT_ID.iam.gserviceaccount.com';
+"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:openinsider-airflow-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/bigquery.jobUser"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:openinsider-serving-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/bigquery.jobUser"
+
+
+Secret Manager
+--------------
+
+echo -n "YOUR_FINNHUB_KEY" | gcloud secrets create FINNHUB_KEY --data-file=-
+echo -n "YOUR_FRED_KEY" | gcloud secrets create FRED_KEY --data-file=-
+
+gcloud secrets add-iam-policy-binding FINNHUB_KEY \
+  --member="serviceAccount:openinsider-ingestion-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud secrets add-iam-policy-binding FRED_KEY \
+  --member="serviceAccount:openinsider-ingestion-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud secrets list
+
+
+Cloud Build Role Fix
+--------------------
+
+# Use this only if deployment warns that the default build service account is
+# missing roles/cloudbuild.builds.builder.
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role=roles/cloudbuild.builds.builder
+
+
+Prepare Cloud Function Deploy Bundles
+-------------------------------------
+
+rm -rf /tmp/openinsider-functions/fetch_macro
+mkdir -p /tmp/openinsider-functions/fetch_macro
+cp ingestion/fetch_macro/main.py /tmp/openinsider-functions/fetch_macro/main.py
+cp ingestion/fetch_macro/requirements.txt /tmp/openinsider-functions/fetch_macro/requirements.txt
+cp -r config /tmp/openinsider-functions/fetch_macro/config
+
+rm -rf /tmp/openinsider-functions/fetch_prices
+mkdir -p /tmp/openinsider-functions/fetch_prices
+cp ingestion/fetch_prices/main.py /tmp/openinsider-functions/fetch_prices/main.py
+cp ingestion/fetch_prices/requirements.txt /tmp/openinsider-functions/fetch_prices/requirements.txt
+cp -r config /tmp/openinsider-functions/fetch_prices/config
+
+rm -rf /tmp/openinsider-functions/fetch_filings
+mkdir -p /tmp/openinsider-functions/fetch_filings
+cp ingestion/fetch_filings/main.py /tmp/openinsider-functions/fetch_filings/main.py
+cp ingestion/fetch_filings/requirements.txt /tmp/openinsider-functions/fetch_filings/requirements.txt
+cp -r config /tmp/openinsider-functions/fetch_filings/config
+
+
+Deploy Cloud Functions
+----------------------
+
+gcloud functions deploy fetch_macro \
+  --gen2 \
+  --runtime python312 \
+  --region "$REGION" \
+  --entry-point fetch_macro \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --service-account "openinsider-ingestion-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --memory 256MB \
+  --timeout 180s \
+  --set-env-vars "GCS_BUCKET=$GCS_BUCKET,GCP_PROJECT_ID=$PROJECT_ID" \
+  --set-secrets "FRED_KEY=FRED_KEY:latest" \
+  --source /tmp/openinsider-functions/fetch_macro
+
+gcloud functions deploy fetch_prices \
+  --gen2 \
+  --runtime python312 \
+  --region "$REGION" \
+  --entry-point fetch_prices \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --service-account "openinsider-ingestion-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --memory 512MB \
+  --timeout 180s \
+  --set-env-vars "GCS_BUCKET=$GCS_BUCKET,GCP_PROJECT_ID=$PROJECT_ID" \
+  --set-secrets "FINNHUB_KEY=FINNHUB_KEY:latest" \
+  --source /tmp/openinsider-functions/fetch_prices
+
+gcloud functions deploy fetch_filings \
+  --gen2 \
+  --runtime python312 \
+  --region "$REGION" \
+  --entry-point fetch_filings \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --service-account "openinsider-ingestion-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --memory 512MB \
+  --timeout 540s \
+  --set-env-vars "GCS_BUCKET=$GCS_BUCKET,GCP_PROJECT_ID=$PROJECT_ID,SEC_USER_AGENT=openinsider/1.0 YOUR_NAME YOUR_EMAIL" \
+  --source /tmp/openinsider-functions/fetch_filings
+
+
+Cloud Function URLs
+-------------------
+
+export FETCH_MACRO_URL="$(gcloud functions describe fetch_macro --region="$REGION" --format='value(serviceConfig.uri)')"
+export FETCH_PRICES_URL="$(gcloud functions describe fetch_prices --region="$REGION" --format='value(serviceConfig.uri)')"
+export FETCH_FILINGS_URL="$(gcloud functions describe fetch_filings --region="$REGION" --format='value(serviceConfig.uri)')"
+
+echo $FETCH_MACRO_URL
+echo $FETCH_PRICES_URL
+echo $FETCH_FILINGS_URL
+
+
+Cloud Function Invoker IAM
+--------------------------
+
+# For Gen 2 Cloud Functions, underlying Cloud Run service names use hyphens.
+gcloud run services add-iam-policy-binding fetch-macro \
+  --region="$REGION" \
+  --member="serviceAccount:openinsider-airflow-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/run.invoker"
+
+gcloud run services add-iam-policy-binding fetch-prices \
+  --region="$REGION" \
+  --member="serviceAccount:openinsider-airflow-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/run.invoker"
+
+gcloud run services add-iam-policy-binding fetch-filings \
+  --region="$REGION" \
+  --member="serviceAccount:openinsider-airflow-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/run.invoker"
+
+
+Smoke Test Cloud Functions
+--------------------------
+
+curl -X POST "$FETCH_MACRO_URL" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"days_back": 30}'
+
+curl -X POST "$FETCH_PRICES_URL" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"tickers": ["AAPL", "MSFT"], "news_days_back": 3}'
+
+curl -X POST "$FETCH_FILINGS_URL" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"tickers": ["AAPL"], "days_back": 7, "max_filings_per_ticker": 1}'
+
+
+Airflow VM
+----------
+
+export VM_NAME="openinsider-airflow-vm"
+export AIRFLOW_SA="openinsider-airflow-sa@$PROJECT_ID.iam.gserviceaccount.com"
+
+gcloud compute instances create "$VM_NAME" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --machine-type=e2-micro \
+  --image-family=ubuntu-2404-lts-amd64 \
+  --image-project=ubuntu-os-cloud \
+  --boot-disk-size=30GB \
+  --service-account="$AIRFLOW_SA" \
+  --scopes=https://www.googleapis.com/auth/cloud-platform \
+  --tags=airflow-vm
+
+gcloud compute ssh "$VM_NAME" --zone="$ZONE"
+
+
+Inside Airflow VM
+-----------------
+
+sudo apt-get update
+sudo apt-get install -y docker.io docker-compose-v2 git
+sudo usermod -aG docker $USER
+newgrp docker
+
+docker --version
+docker compose version
+docker ps
+
+git clone https://github.com/jmmehta2904/openinsider.git
+cd openinsider
+
+nano .env
+
+docker compose up airflow-init
+docker compose up -d airflow-webserver airflow-scheduler
+docker compose ps
+
+docker compose logs airflow-init --tail=200
+docker compose logs airflow-webserver --tail=100
+docker compose logs airflow-scheduler --tail=100
+
+docker compose exec airflow-webserver airflow dags list
+docker compose exec airflow-webserver airflow dags list-import-errors
+
+docker compose exec airflow-webserver airflow dags pause sec_ingest
+docker compose exec airflow-webserver airflow dags pause price_enrichment
+docker compose exec airflow-webserver airflow dags pause flag_suspicious
+docker compose exec airflow-webserver airflow dags pause weekly_report
+
+docker compose exec airflow-webserver airflow dags trigger sec_ingest
+
+
+Secure Airflow UI Tunnel
+------------------------
+
+# Run from local machine or Cloud Shell. Keep the terminal open.
+gcloud compute ssh openinsider-airflow-vm \
+  --zone=us-central1-a \
+  -- -L 8080:localhost:8080
+
+# Then open:
+# http://localhost:8080
+# Login: airflow / airflow
+
+
+Cost Control: GCS Lifecycle
+---------------------------
+
+cat > lifecycle.json <<'EOF'
+{
+  "rule": [
+    {
+      "action": {"type": "Delete"},
+      "condition": {
+        "age": 14,
+        "matchesPrefix": ["filings/", "prices/", "news/", "macro/", "reports/"]
+      }
+    }
+  ]
+}
+EOF
+
+gcloud storage buckets update "gs://$GCS_BUCKET" --lifecycle-file=lifecycle.json
+
+
+Cost Control: BigQuery Partition Expiration
+-------------------------------------------
+
+export RETENTION_14_DAYS=1209600
+export RETENTION_90_DAYS=7776000
+
+bq update --time_partitioning_expiration "$RETENTION_14_DAYS" "$PROJECT_ID:$BQ_DATASET.filing_documents_raw"
+bq update --time_partitioning_expiration "$RETENTION_14_DAYS" "$PROJECT_ID:$BQ_DATASET.filings_raw"
+bq update --time_partitioning_expiration "$RETENTION_14_DAYS" "$PROJECT_ID:$BQ_DATASET.prices_enriched"
+bq update --time_partitioning_expiration "$RETENTION_14_DAYS" "$PROJECT_ID:$BQ_DATASET.company_news_raw"
+bq update --time_partitioning_expiration "$RETENTION_14_DAYS" "$PROJECT_ID:$BQ_DATASET.macro_context"
+bq update --time_partitioning_expiration "$RETENTION_14_DAYS" "$PROJECT_ID:$BQ_DATASET.pipeline_runs"
+
+bq update --time_partitioning_expiration "$RETENTION_90_DAYS" "$PROJECT_ID:$BQ_DATASET.insider_alerts"
+bq update --time_partitioning_expiration "$RETENTION_90_DAYS" "$PROJECT_ID:$BQ_DATASET.weekly_summary"

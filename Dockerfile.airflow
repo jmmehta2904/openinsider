@@ -1,0 +1,9 @@
+FROM apache/airflow:2.9.0
+
+USER airflow
+
+RUN pip install --no-cache-dir \
+    google-cloud-bigquery==3.25.0 \
+    google-cloud-storage==2.18.2 \
+    requests==2.32.3 \
+    python-dotenv==1.0.1

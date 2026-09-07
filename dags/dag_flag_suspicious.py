@@ -6,9 +6,6 @@ import os
 from datetime import datetime, timedelta
 
 from airflow.decorators import dag, task
-from google.cloud import bigquery
-
-from config.settings import BQ_DATASET, GCP_PROJECT_ID
 
 
 DEFAULT_ARGS = {
@@ -34,7 +31,7 @@ def _setting(name: str, default: str = "") -> str:
 
 
 def _table(table_name: str) -> str:
-    return f"{_setting('GCP_PROJECT_ID', GCP_PROJECT_ID)}.{_setting('BQ_DATASET', BQ_DATASET)}.{table_name}"
+    return f"{_setting('GCP_PROJECT_ID')}.{_setting('BQ_DATASET', 'sec_insider')}.{table_name}"
 
 
 @dag(
@@ -50,7 +47,9 @@ def _table(table_name: str) -> str:
 def flag_suspicious():
     @task
     def compute_and_store_alerts() -> None:
-        client = bigquery.Client(project=_setting("GCP_PROJECT_ID", GCP_PROJECT_ID))
+        from google.cloud import bigquery
+
+        client = bigquery.Client(project=_setting("GCP_PROJECT_ID"))
         query = f"""
         MERGE `{_table("insider_alerts")}` target
         USING (

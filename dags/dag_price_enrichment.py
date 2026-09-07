@@ -6,12 +6,7 @@ import json
 import os
 from datetime import datetime, timedelta
 
-import requests
 from airflow.decorators import dag, task
-from google.cloud import bigquery, storage
-
-from config.settings import BQ_DATASET, GCP_PROJECT_ID, GCS_BUCKET
-from dags.bigquery_utils import insert_new_rows_by_key, replace_partition_rows
 
 
 DEFAULT_ARGS = {
@@ -28,7 +23,7 @@ def _setting(name: str, default: str = "") -> str:
 
 
 def _table(table_name: str) -> str:
-    return f"{_setting('GCP_PROJECT_ID', GCP_PROJECT_ID)}.{_setting('BQ_DATASET', BQ_DATASET)}.{table_name}"
+    return f"{_setting('GCP_PROJECT_ID')}.{_setting('BQ_DATASET', 'sec_insider')}.{table_name}"
 
 
 @dag(
@@ -44,7 +39,9 @@ def _table(table_name: str) -> str:
 def price_enrichment():
     @task
     def get_recent_filing_tickers() -> list[str]:
-        client = bigquery.Client(project=_setting("GCP_PROJECT_ID", GCP_PROJECT_ID))
+        from google.cloud import bigquery
+
+        client = bigquery.Client(project=_setting("GCP_PROJECT_ID"))
         query = f"""
             SELECT DISTINCT ticker
             FROM `{_table("filings_raw")}`
@@ -58,6 +55,8 @@ def price_enrichment():
 
     @task
     def trigger_fetch_prices(tickers: list[str]) -> dict:
+        from dags.http_utils import post_cloud_function_json
+
         if not tickers:
             return {"status": "skipped", "reason": "No recent filing tickers"}
 
@@ -65,20 +64,22 @@ def price_enrichment():
         if not url:
             raise RuntimeError("FETCH_PRICES_URL is required")
 
-        response = requests.post(
+        return post_cloud_function_json(
             url,
-            json={"tickers": tickers, "news_days_back": 7},
+            {"tickers": tickers, "news_days_back": 7},
             timeout=180,
         )
-        response.raise_for_status()
-        return response.json()
 
     @task
     def load_price_and_news(fetch_result: dict) -> dict:
-        bucket_name = _setting("GCS_BUCKET", GCS_BUCKET)
+        from google.cloud import bigquery, storage
+
+        from dags.bigquery_utils import insert_new_rows_by_key, replace_partition_rows
+
+        bucket_name = _setting("GCS_BUCKET")
         storage_client = storage.Client()
         bucket = storage_client.bucket(bucket_name)
-        bq_client = bigquery.Client(project=_setting("GCP_PROJECT_ID", GCP_PROJECT_ID))
+        bq_client = bigquery.Client(project=_setting("GCP_PROJECT_ID"))
 
         price_rows = []
         news_rows = []
