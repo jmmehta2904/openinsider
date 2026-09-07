@@ -306,7 +306,7 @@ def load_alerts(
 def load_data_health(lookback_days: int) -> pd.DataFrame:
     return query_dataframe(
         f"""
-        SELECT 'filing_documents_raw' AS table_name, COUNT(*) AS rows
+        SELECT 'filing_documents_raw' AS table_name, COUNT(*) AS row_count
         FROM `{table_id("filing_documents_raw")}`
         WHERE filing_date >= DATE_SUB(CURRENT_DATE(), INTERVAL @lookback_days DAY)
         UNION ALL
@@ -490,7 +490,7 @@ try:
     with tab_health:
         health_cols = st.columns(4)
         for idx, row in health_df.iterrows():
-            health_cols[idx % 4].metric(str(row["table_name"]), f"{int(row['rows']):,}")
+            health_cols[idx % 4].metric(str(row["table_name"]), f"{int(row['row_count']):,}")
         st.dataframe(health_df, use_container_width=True, hide_index=True)
 
 except (GoogleAPIError, RuntimeError) as exc:
