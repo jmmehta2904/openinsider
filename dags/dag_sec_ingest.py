@@ -44,7 +44,7 @@ def _csv_setting(name: str) -> list[str] | None:
     dag_id="sec_ingest",
     default_args=DEFAULT_ARGS,
     description="Fetch SEC Form 4 filings, preserve raw documents, parse transaction rows",
-    schedule="*/15 * * * *",
+    schedule=None,
     start_date=datetime(2026, 9, 1),
     catchup=False,
     max_active_runs=1,

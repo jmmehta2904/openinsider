@@ -37,7 +37,7 @@ def _csv_setting(name: str) -> list[str] | None:
     dag_id="price_enrichment",
     default_args=DEFAULT_ARGS,
     description="Fetch Finnhub quotes and news for tickers with recent SEC activity",
-    schedule="@hourly",
+    schedule=None,
     start_date=datetime(2026, 9, 1),
     catchup=False,
     max_active_runs=1,
@@ -87,7 +87,7 @@ def price_enrichment():
     def load_price_and_news(fetch_result: dict) -> dict:
         from google.cloud import bigquery, storage
 
-        from dags.bigquery_utils import insert_new_rows_by_key, replace_partition_rows
+        from dags.bigquery_utils import insert_new_rows_by_columns, insert_new_rows_by_key
 
         bucket_name = _setting("GCS_BUCKET")
         storage_client = storage.Client()
@@ -142,16 +142,11 @@ def price_enrichment():
 
         inserted_prices = 0
         if price_rows:
-            tickers = sorted({row["ticker"] for row in price_rows})
-            quoted = ", ".join([f"'{ticker}'" for ticker in tickers])
-            extra_predicate = f"ticker IN ({quoted})"
-            inserted_prices = replace_partition_rows(
+            inserted_prices = insert_new_rows_by_columns(
                 client=bq_client,
                 table_id=_table("prices_enriched"),
                 rows=price_rows,
-                partition_column="price_date",
-                partition_value=price_date,
-                extra_delete_predicate=extra_predicate,
+                key_columns=["ticker", "price_date"],
             )
         inserted_news = insert_new_rows_by_key(
             client=bq_client,

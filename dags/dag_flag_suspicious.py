@@ -38,7 +38,7 @@ def _table(table_name: str) -> str:
     dag_id="flag_suspicious",
     default_args=DEFAULT_ARGS,
     description="Score enriched insider trading activity and maintain alert table",
-    schedule="0 23 * * *",
+    schedule=None,
     start_date=datetime(2026, 9, 1),
     catchup=False,
     max_active_runs=1,

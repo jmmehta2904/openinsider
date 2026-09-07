@@ -29,7 +29,7 @@ def _table(table_name: str) -> str:
     dag_id="weekly_report",
     default_args=DEFAULT_ARGS,
     description="Maintain weekly gold summary and export Parquet/CSV reports to GCS",
-    schedule="0 6 * * 1",
+    schedule=None,
     start_date=datetime(2026, 9, 1),
     catchup=False,
     max_active_runs=1,

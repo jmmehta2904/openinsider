@@ -1,73 +1,82 @@
 # OpenInsider Pipeline
 
-OpenInsider Pipeline is a public data engineering portfolio project that ingests SEC EDGAR Form 4 insider trading filings, enriches them with market/news/macro context, stores curated layers in BigQuery, and serves an analytical dashboard from Cloud Run.
+A GCP and Airflow data engineering project that tracks SEC Form 4 insider trading filings, enriches them with market and macro context, and serves a BigQuery-backed dashboard.
 
-The project demonstrates GCP-native ingestion, raw-to-gold warehouse modeling, Airflow orchestration, idempotent loads, and secure service-account based execution without committing credentials to the repository.
+## Problem
 
-## Architecture
+SEC insider trading filings are public, but they are hard to use directly. Form 4 documents arrive as XML filings in EDGAR, market context lives in separate APIs, and useful analysis requires joining filings, prices, news, and macro indicators into a queryable warehouse.
+
+## Solution
+
+OpenInsider Pipeline turns that raw public data into an analytical workflow:
 
 ```text
-SEC EDGAR        Finnhub           FRED
-   |               |                |
-   v               v                v
-Cloud Functions: fetch_filings, fetch_prices, fetch_macro
-   |
-   v
+SEC EDGAR + Finnhub + FRED
+        |
+        v
+Cloud Functions
+        |
+        v
 Cloud Storage raw zone
-   |
-   v
-Airflow DAGs on Compute Engine
-   |
-   v
-BigQuery bronze/silver/gold tables
-   |
-   v
+        |
+        v
+Airflow orchestration
+        |
+        v
+BigQuery warehouse
+        |
+        v
 Streamlit dashboard on Cloud Run
 ```
 
-## Implemented Components
+The pipeline keeps raw source files in GCS, parses Form 4 XML into transaction-level BigQuery rows, enriches trades with price/news/macro context, scores notable activity, and exposes the results through a dashboard.
+The dashboard supports ticker/company search plus filters for transaction code, insider role, transaction value, and alert score.
 
-- `config/watchlist.py`: 50-company ticker-to-CIK watchlist.
-- `ingestion/fetch_filings`: SEC EDGAR Form 4 ingestion into GCS.
-- `ingestion/fetch_prices`: Finnhub quote and company-news ingestion into GCS.
-- `ingestion/fetch_macro`: FRED macro indicator ingestion into GCS.
-- `transforms/parse_form4.py`: Form 4 XML parser preserving transaction-level detail.
-- `infra/bigquery_schema.sql`: partitioned and clustered BigQuery warehouse schema.
-- `dags/`: Airflow DAGs for ingestion, enrichment, scoring, and weekly reporting.
-- `serving/dashboard`: Streamlit dashboard querying BigQuery directly.
+## Pipeline Flow
 
-## Required Environment
-
-The real `.env` file is intentionally not committed. Required values:
+The scheduled master DAG is `openinsider_pipeline`:
 
 ```text
-GCP_PROJECT_ID
-REGION
-GCS_BUCKET
-BQ_DATASET
-FETCH_FILINGS_URL
-FETCH_PRICES_URL
-FETCH_MACRO_URL
-SEC_USER_AGENT
-FINNHUB_KEY
-FRED_KEY
+sec_ingest
+  -> macro_context
+  -> price_enrichment
+  -> flag_suspicious
+  -> weekly_report
 ```
 
-Optional demo controls:
+Child DAGs are manual-only and reusable for debugging or learning individual Airflow stages.
 
-```text
-AIRFLOW_TASK_RETRIES=0
-AIRFLOW_TASK_RETRY_DELAY_MINUTES=1
-DASHBOARD_DEFAULT_LOOKBACK_DAYS=90
-```
+## Tech Stack
 
-## BigQuery Setup
+- Python 3.12
+- Apache Airflow 2.9
+- Google Cloud Functions
+- Google Cloud Storage
+- BigQuery
+- Cloud Run
+- Streamlit
+- Docker
+- PostgreSQL for Airflow metadata
+
+## Data Sources
+
+- SEC EDGAR Form 4 filings and official company ticker metadata
+- Finnhub quotes and company news
+- FRED macro indicators: S&P 500, VIX, Fed Funds Rate, 10-year Treasury yield
+
+## Security
+
+Secrets and API keys are not committed. Runtime credentials are supplied through environment variables, Secret Manager, or GCP service accounts. Cloud Functions are private and invoked by authorized service accounts.
+
+## Cost Control
+
+The project is intentionally scoped to a 150-company watchlist verified against SEC ticker metadata. Airflow can run on a temporary Compute Engine VM, while Cloud Functions, GCS, BigQuery, and Cloud Run remain low-cost for demo-scale usage. Stop the VM when not testing:
 
 ```bash
-bq query --use_legacy_sql=false --location=us-central1 < infra/bigquery_schema.sql
+gcloud compute instances stop openinsider-airflow-vm --zone=us-central1-a
 ```
 
-## Local Airflow
+## Run Locally
 
 ```bash
 docker compose build
@@ -81,23 +90,20 @@ Airflow UI:
 http://localhost:8080
 ```
 
-Default local login:
-
-```text
-airflow / airflow
-```
-
-## DAG Smoke Tests
+## Validate Airflow
 
 ```bash
 docker compose exec airflow-webserver airflow dags list
 docker compose exec postgres psql -U airflow -d airflow -c "SELECT filename, timestamp FROM import_error;"
-docker compose exec airflow-webserver airflow dags test sec_ingest 2026-09-07
 ```
 
-## Dashboard Deployment
+Run the full orchestrated pipeline manually:
 
-Run from the repository root:
+```bash
+docker compose exec airflow-webserver airflow dags test openinsider_pipeline 2026-09-07
+```
+
+## Deploy Dashboard
 
 ```bash
 cd serving/dashboard
@@ -110,19 +116,9 @@ gcloud run deploy openinsider-dashboard \
   --set-env-vars GCP_PROJECT_ID=insider-trade-507718,BQ_DATASET=sec_insider,DASHBOARD_DEFAULT_LOOKBACK_DAYS=90
 ```
 
-The Cloud Run service account needs:
+The dashboard service account needs BigQuery read/query access:
 
 ```text
 roles/bigquery.jobUser
 roles/bigquery.dataViewer
 ```
-
-## Cost Control
-
-Keep Airflow DAGs paused while testing manually. Stop the Compute Engine VM when not actively developing:
-
-```bash
-gcloud compute instances stop openinsider-airflow-vm --zone=us-central1-a
-```
-
-Cloud Functions, GCS, BigQuery, and Cloud Run should remain low-cost for this narrow watchlist workload, especially when used as a short-lived portfolio demo.

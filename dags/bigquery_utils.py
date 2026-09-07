@@ -42,7 +42,41 @@ def insert_new_rows_by_key(
         return 0
 
     existing = set(_existing_keys(client, table_id, key_column, keys, key_type))
-    rows_to_insert = [row for row in rows if row.get(key_column) not in existing]
+    rows_to_insert = [row for row in rows if str(row.get(key_column)) not in existing]
+    if not rows_to_insert:
+        return 0
+
+    errors = client.insert_rows_json(table_id, _normalize_rows_for_bigquery(rows_to_insert))
+    if errors:
+        raise RuntimeError(f"BigQuery insert failed for {table_id}: {errors}")
+    return len(rows_to_insert)
+
+
+def insert_new_rows_by_columns(
+    client: Any,
+    table_id: str,
+    rows: Sequence[dict[str, Any]],
+    key_columns: Sequence[str],
+) -> int:
+    """Insert rows whose composite key does not already exist in the target table."""
+    if not rows:
+        return 0
+
+    candidate_keys = {
+        _composite_key(row, key_columns)
+        for row in rows
+        if all(row.get(column) is not None for column in key_columns)
+    }
+    if not candidate_keys:
+        return 0
+
+    existing = set(_existing_composite_keys(client, table_id, key_columns, sorted(candidate_keys)))
+    rows_to_insert = [
+        row
+        for row in rows
+        if all(row.get(column) is not None for column in key_columns)
+        and _composite_key(row, key_columns) not in existing
+    ]
     if not rows_to_insert:
         return 0
 
@@ -144,6 +178,44 @@ def _existing_keys(
         ),
     )
     return [row["existing_key"] for row in job.result()]
+
+
+def _existing_composite_keys(
+    client: Any,
+    table_id: str,
+    key_columns: Sequence[str],
+    keys: Sequence[str],
+) -> list[str]:
+    from google.cloud import bigquery
+
+    concat_expression = _composite_key_expression(key_columns)
+    query = f"""
+        SELECT {concat_expression} AS existing_key
+        FROM `{table_id}`
+        WHERE {concat_expression} IN UNNEST(@keys)
+    """
+    job = client.query(
+        query,
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ArrayQueryParameter("keys", "STRING", list(set(keys)))
+            ]
+        ),
+    )
+    return [row["existing_key"] for row in job.result()]
+
+
+def _composite_key(row: dict[str, Any], key_columns: Sequence[str]) -> str:
+    return "|".join(str(row[column]) for column in key_columns)
+
+
+def _composite_key_expression(key_columns: Sequence[str]) -> str:
+    parts = []
+    for idx, column in enumerate(key_columns):
+        if idx:
+            parts.append("'|'")
+        parts.append(f"CAST({column} AS STRING)")
+    return f"CONCAT({', '.join(parts)})"
 
 
 def _normalize_rows_for_bigquery(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:

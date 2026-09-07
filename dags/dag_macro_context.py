@@ -30,7 +30,7 @@ def _table(table_name: str) -> str:
     dag_id="macro_context",
     default_args=DEFAULT_ARGS,
     description="Fetch FRED macro context and load the BigQuery macro table",
-    schedule="0 5 * * *",
+    schedule=None,
     start_date=datetime(2026, 9, 1),
     catchup=False,
     max_active_runs=1,
